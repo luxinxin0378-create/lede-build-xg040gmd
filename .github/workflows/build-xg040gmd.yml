@@ -304,12 +304,31 @@ jobs:
             echo "::error::内核配置文件里 NPU/PPE/CPUFREQ 未全部开启"; exit 1; }
 
           echo "===== 2) .config 中相关包是否选中 ====="
-          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-argon luci-app-argon-config luci-app-openclash luci-app-qmodem kmod-nft-offload; do
+          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-argon luci-app-argon-config luci-app-openclash luci-app-qmodem-next luci-app-qmodem-sms luci-app-qmodem-monitor kmod-nft-offload; do
             if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then
               echo "  OK   $p"
             else
               echo "::error::  MISS $p"
               exit 1
+            fi
+          done
+
+          echo "===== 2c) QModem 全功能校验 ====="
+          # qmodem 与 qmodem-next 互斥，必须 -next 生效、旧版关闭
+          if grep -q "^CONFIG_PACKAGE_luci-app-qmodem=y" .config; then
+            echo "::error::luci-app-qmodem 与 -next 冲突，旧版被选中"
+            exit 1
+          fi
+          echo "  OK   旧版 luci-app-qmodem 已关闭（使用 -next）"
+          for p in qmodem qmodem-smsd libqmodem-sms luci-app-qmodem-sms sms-forwarder-next \
+                   qmodem_monitor luci-app-qmodem-monitor luci-app-qmodem-mwan luci-app-mwan3 \
+                   luci-app-qmodem-ttl luci-app-qmodem-ttlfw4 qmodem-uplink-manager \
+                   luci-app-qmodem-uplink qmodem-voip qmodem-sipd luci-app-qmodem-voip \
+                   qmodem-settings tom_modem ubus-at-daemon libsqlite3; do
+            if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then
+              echo "  OK   $p"
+            else
+              echo "::warning::  MISS $p（该 feed 可能无此包名，不影响主功能）"
             fi
           done
 
