@@ -232,7 +232,7 @@ jobs:
           ls -lh "$COREDIR"
           file "$COREDIR/clash_meta" || true
 
-      - name: 注入默认配置（Material 主题 / flow offload）
+      - name: 注入默认配置（Argon 主题 / flow offload）
         run: |
           cd lede
           mkdir -p files
@@ -257,7 +257,7 @@ jobs:
           fi
           tail -n 30 build.log
 
-      - name: 产物功能校验（NPU / PPE / Material）
+      - name: 产物功能校验（NPU / PPE / Argon）
         run: |
           cd lede
           echo "===== 1) 内核配置校验 ====="
@@ -266,7 +266,7 @@ jobs:
             echo "::error::内核配置文件里 NPU/PPE/CPUFREQ 未全部开启"; exit 1; }
 
           echo "===== 2) .config 中相关包是否选中 ====="
-          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-material luci-theme-bootstrap luci-app-openclash luci-app-qmodem kmod-nft-offload; do
+          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-argon luci-app-argon-config luci-app-openclash luci-app-qmodem kmod-nft-offload; do
             if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then
               echo "  OK   $p"
             else
@@ -305,7 +305,7 @@ jobs:
               for f in \
                 "usr/lib/lua/luci/controller/airoha_npu.lua" \
                 "etc/uci-defaults/99-xg040gmd-init" \
-                "www/luci-static/material" \
+                "www/luci-static/argon" \
                 "etc/openclash/core/clash_meta"; do
                 if grep -q "$f" /tmp/fslist.txt 2>/dev/null; then
                   echo "  OK   /$f"
