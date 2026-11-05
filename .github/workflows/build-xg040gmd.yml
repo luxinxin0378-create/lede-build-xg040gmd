@@ -232,7 +232,7 @@ jobs:
           ls -lh "$COREDIR"
           file "$COREDIR/clash_meta" || true
 
-      - name: 注入默认配置（Argon 主题 / flow offload）
+      - name: 注入默认配置（Material 主题 / flow offload）
         run: |
           cd lede
           mkdir -p files
@@ -257,7 +257,7 @@ jobs:
           fi
           tail -n 30 build.log
 
-      - name: 产物功能校验（NPU / PPE / Argon）
+      - name: 产物功能校验（NPU / PPE / Material）
         run: |
           cd lede
           echo "===== 1) 内核配置校验 ====="
@@ -266,7 +266,7 @@ jobs:
             echo "::error::内核配置文件里 NPU/PPE/CPUFREQ 未全部开启"; exit 1; }
 
           echo "===== 2) .config 中相关包是否选中 ====="
-          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-argon luci-app-argon-config luci-app-openclash luci-app-qmodem kmod-nft-offload; do
+          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-material luci-theme-bootstrap luci-app-openclash luci-app-qmodem kmod-nft-offload; do
             if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then
               echo "  OK   $p"
             else
@@ -285,7 +285,7 @@ jobs:
               for f in \
                 "usr/lib/lua/luci/controller/airoha_npu.lua" \
                 "etc/uci-defaults/99-xg040gmd-init" \
-                "www/luci-static/argon" \
+                "www/luci-static/material" \
                 "etc/openclash/core/clash_meta"; do
                 if grep -q "$f" /tmp/fslist.txt 2>/dev/null; then
                   echo "  OK   /$f"
@@ -301,28 +301,52 @@ jobs:
           echo "===== 4) 编译产物中 内核模块 校验 ====="
           ls -lh bin/targets/airoha/an7581/packages/ 2>/dev/null | head -20 || true
 
-      - name: 整理产物
+      - name: 整理产物并按规则重命名
         run: |
           cd lede
           OUT="$GITHUB_WORKSPACE/out"; mkdir -p "$OUT"
-          find bin/targets/airoha/an7581 -maxdepth 1 -type f \
-            \( -name "*xg-040g-md*" -o -name "sha256sums" -o -name "profiles.json" \) \
-            -exec cp -v {} "$OUT/" \; 2>/dev/null || true
-          if ! ls "$OUT" 2>/dev/null | grep -q xg-040g-md; then
-            echo "::warning::未找到专属镜像，拷贝全部产物"
-            find bin/targets/airoha -maxdepth 2 -type f -exec cp -v {} "$OUT/" \; 2>/dev/null || true
+          DATE=$(date +%Y%m%d)
+          BUILDNO="${{ github.run_number }}"
+          VER=$(grep '^CONFIG_VERSION_NUMBER=' .config | cut -d'"' -f2)
+          VER=${VER:-$LEDE_SHORT}
+
+          echo "命名前缀: XG-040G-MD_LEDE_${DATE}_b${BUILDNO}"
+
+          # 逐个重命名——保留原始镜像类型标识，便于区分
+          for f in bin/targets/airoha/an7581/*xg-040g-md*; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            case "$base" in
+              *.itb)        kind="kernel.itb" ;;
+              *rootfs*.bin) kind="rootfs.bin" ;;
+              *.bin)        kind="factory.bin" ;;
+              *.img.gz)     kind="sysupgrade.img.gz" ;;
+              sha256sums)   continue ;;
+              *)            kind="${base##*.}" ;;
+            esac
+            # 去掉 openwrt- 前缀与设备名，只保留类型
+            NEW="XG-040G-MD_LEDE_${DATE}_b${BUILDNO}_${kind}"
+            cp -v "$f" "$OUT/$NEW"
+            echo "  重命名: $base -> $NEW"
+          done
+
+          # 兜底：如果没有匹配到 md 镜像，拷贝全部
+          if ! ls "$OUT" 2>/dev/null | grep -q XG-040G-MD; then
+            echo "::warning::未匹配到 md 专属镜像，改用原始文件名"
+            find bin/targets/airoha/an7581 -maxdepth 1 -type f -exec cp -v {} "$OUT/" \; 2>/dev/null || true
           fi
+
           cd "$OUT"
           sha256sum * > SHA256SUMS.txt 2>/dev/null || true
           cp "$GITHUB_WORKSPACE"/lede/.config config-used.txt 2>/dev/null || true
-          echo "----- 产物 -----"; ls -lh
+          echo "----- 最终产物 -----"; ls -lh
           echo "----- rootfs 大小 -----"
           ls -lh "$GITHUB_WORKSPACE"/lede/bin/targets/airoha/an7581/*rootfs* 2>/dev/null || true
 
       - name: 上传 Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: lede-xg040gmd-${{ env.LEDE_SHORT }}-${{ github.run_number }}
+          name: XG-040G-MD_LEDE_${{ github.run_number }}
           path: out/*
           retention-days: 30
           if-no-files-found: error
@@ -330,8 +354,8 @@ jobs:
       - name: 发布 Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: lede-xg040gmd-${{ github.run_number }}
-          name: XG-040G-MD LEDE ${{ github.run_number }} (${{ env.LEDE_SHORT }})
+          tag_name: XG-040G-MD_b${{ github.run_number }}
+          name: XG-040G-MD LEDE b${{ github.run_number }} (${{ env.LEDE_SHORT }})
           body: |
             **Nokia XG-040G-MD** (Airoha AN7581DT) — Lean LEDE 固件
 
