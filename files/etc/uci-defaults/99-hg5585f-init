@@ -1,0 +1,25 @@
+#!/bin/sh
+# FiberHome HG5585F (CT) 首次启动初始化（uci-defaults）
+
+# ===== 默认主题设为 Argon（LEDE 自带）=====
+uci set luci.main.mediaurlbase='/luci-static/argon'
+uci commit luci
+
+# ===== 开启 nftables 硬件加速 flowtable offload =====
+uci set firewall.@defaults[0].flow_offloading='1'
+uci set firewall.@defaults[0].flow_offloading_hw='1'
+uci commit firewall
+
+# ===== 挂载 debugfs（PPE 流程表 / NPU 状态依赖）=====
+if ! grep -q "debugfs" /etc/fstab 2>/dev/null; then
+  echo "debugfs   /sys/kernel/debug   debugfs   noauto,0 0" >> /etc/fstab
+fi
+mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
+
+# ===== LAN 默认地址（HG5585F 原厂为 192.168.1.1，保持一致便于找回）=====
+# 仅在首次启动且未被用户修改时生效
+if [ "$(uci -q get network.lan.ipaddr)" = "192.168.1.1" ]; then
+  logger -t hg5585f-init "LAN 保持 192.168.1.1"
+fi
+
+exit 0
