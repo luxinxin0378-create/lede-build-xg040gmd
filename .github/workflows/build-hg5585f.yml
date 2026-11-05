@@ -132,39 +132,34 @@ jobs:
           fi
 
           # ---------- 第二步：锁定设备 ----------
-          # 上游 target-metadata.pl 已把 TARGET_MULTI_PROFILE 设为默认，
-          # 因此设备符号统一是 CONFIG_TARGET_DEVICE_<board>_<sub>_DEVICE_<设备名>。
-          # 这里不直接改符号，而是先切换到 "Target Profile" 单选模式，
-          # 再选中目标设备的 profile —— 这样无论上游是否开启 MULTI_PROFILE 都成立。
+          # 上游 target-metadata.pl 默认开启 TARGET_MULTI_PROFILE，
+          # 因此设备符号只有一个合法形式：
+          #   CONFIG_TARGET_<board>_<sub>_DEVICE_<设备名>=y
+          # TARGET_PROFILE 是推导结果，形如 "DEVICE_airoha_an7581-evb"，
+          # 不要手写、也不要关 MULTI_PROFILE（关掉会让设备选择全部失效）。
           echo "----- 第一轮默认设备行 -----"
-          grep -E "^CONFIG_TARGET_(DEVICE_|MULTI_PROFILE|ALL_PROFILES)" .config | head -10 || true
+          grep -E "^CONFIG_TARGET_airoha_an7581_DEVICE_.*=y" .config | head -5 || true
 
-          # 关闭 multi-profile / all-profiles，回到单 profile 模式
-          # 注意：上游 target-metadata.pl 对 TARGET_MULTI_PROFILE 设了 default BUILDBOT，
-          # 因此这里必须写死 "is not set"，并在 make defconfig 之后再确认一次。
-          sed -i 's|^CONFIG_TARGET_MULTI_PROFILE=y|# CONFIG_TARGET_MULTI_PROFILE is not set|' .config
-          sed -i 's|^CONFIG_TARGET_ALL_PROFILES=y|# CONFIG_TARGET_ALL_PROFILES is not set|' .config
-          grep -q "^# CONFIG_TARGET_MULTI_PROFILE is not set" .config \
-            || echo "# CONFIG_TARGET_MULTI_PROFILE is not set" >> .config
-          grep -q "^# CONFIG_TARGET_ALL_PROFILES is not set" .config \
-            || echo "# CONFIG_TARGET_ALL_PROFILES is not set" >> .config
+          # 1) 关掉所有已选中的设备（含默认 evb）——用 awk 做字面量处理，避免正则转义问题
+          awk -v pfx="CONFIG_TARGET_airoha_an7581_DEVICE_" '
+            index($0, pfx) == 1 && substr($0, length($0)-1) == "=y" {
+              name = substr($0, length(pfx)+1, length($0)-length(pfx)-2)
+              print "# " pfx name " is not set"
+              next
+            }
+            { print }
+          ' .config > .config.tmp && mv .config.tmp .config
 
-          # 关闭所有已选中的独立设备符号（多设备模式残留）
-          sed -i -E 's|^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_([A-Za-z0-9._+-]*)=y|# CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_\1 is not set|' .config
+          # 2) 打开目标设备
+          sed -i "s|^# CONFIG_TARGET_airoha_an7581_DEVICE_${DEVICE_NAME} is not set|CONFIG_TARGET_airoha_an7581_DEVICE_${DEVICE_NAME}=y|" .config
+          grep -qx "CONFIG_TARGET_airoha_an7581_DEVICE_${DEVICE_NAME}=y" .config \
+            || echo "CONFIG_TARGET_airoha_an7581_DEVICE_${DEVICE_NAME}=y" >> .config
 
-          # 单 profile 模式下的选择符号：CONFIG_TARGET_<board>_<sub>_<设备名>=y
-          # 先注释掉所有其它 profile 的 =y 行（含设备名带连字符的情况），再打开目标
-          sed -i -E "s|^CONFIG_TARGET_airoha_an7581_([A-Za-z0-9._+-]*)=y|# CONFIG_TARGET_airoha_an7581_\1 is not set|" .config
-          sed -i -E "s|^# CONFIG_TARGET_airoha_an7581_${DEVICE_NAME} is not set|CONFIG_TARGET_airoha_an7581_${DEVICE_NAME}=y|" .config
-          grep -qx "CONFIG_TARGET_airoha_an7581_${DEVICE_NAME}=y" .config \
-            || printf 'CONFIG_TARGET_airoha_an7581_%s=y\n' "${DEVICE_NAME}" >> .config
-
-          echo "----- 写入的 profile 符号 -----"
-          grep -E "^CONFIG_TARGET_airoha_an7581_|^CONFIG_TARGET_MULTI_PROFILE" .config | head -20 || true
-
-          # 显式写入 TARGET_PROFILE，避免它为空导致 image 阶段找不到设备
+          # 3) 删除旧的 TARGET_PROFILE，让 defconfig 依据设备符号重新推导
           sed -i '/^CONFIG_TARGET_PROFILE=/d' .config
-          printf 'CONFIG_TARGET_PROFILE="%s"\n' "${DEVICE_NAME}" >> .config
+
+          echo "----- 改写后设备行 -----"
+          grep -E "^CONFIG_TARGET_airoha_an7581_DEVICE_.*=y" .config | head -5 || true
 
           # ---------- 第三步：追加插件清单并重建 ----------
           grep -vE '^CONFIG_TARGET_(DEVICE|PROFILE|ALL_PROFILES|MULTI_PROFILE)' \
@@ -183,16 +178,14 @@ jobs:
           grep -E "^CONFIG_TARGET_PROFILE=|^CONFIG_TARGET_airoha_an7581_.*=y" .config | head -10
 
           # ---------- 校验 ----------
-          # 单 profile 模式下真正生效的是 CONFIG_TARGET_<board>_<sub>_<设备>=y
-          # 同时 TARGET_PROFILE 应被推导成设备名
-          if grep -q "^CONFIG_TARGET_airoha_an7581_${DEVICE_NAME}=y" .config; then
+          # 以 CONFIG_TARGET_airoha_an7581_DEVICE_<设备>=y 为准
+          if grep -qx "CONFIG_TARGET_airoha_an7581_DEVICE_${DEVICE_NAME}=y" .config; then
             ACTUAL_PROFILE=$(grep -oP '^CONFIG_TARGET_PROFILE="\K[^"]+' .config | head -1)
             echo "✅ 机型校验通过: ${DEVICE_NAME} (TARGET_PROFILE=${ACTUAL_PROFILE:-空})"
           else
             echo "::error::设备 ${DEVICE_NAME} 未被选中"
             echo "--- TARGET_PROFILE ---"; grep -E "^CONFIG_TARGET_PROFILE=" .config || echo "(空)"
             echo "--- 所有 an7581 相关 ---"; grep -i "an7581" .config | head -30 || true
-            echo "--- 设备行 ---"; grep -i "DEVICE_" .config | head -20 || true
             exit 1
           fi
 
