@@ -131,22 +131,27 @@ jobs:
             exit 1
           fi
 
-          # ---------- 第二步：锁定设备 profile ----------
-          # 此时 DEVICE_* 符号已存在于 .config，可以安全替换
-          OLD_PROFILE=$(grep '^CONFIG_TARGET_PROFILE=' .config | head -1 || true)
-          echo "defconfig 默认 profile: ${OLD_PROFILE:-(空)}"
+          # ---------- 第二步：锁定设备 ----------
+          # LEDE 用 TARGET_DEVICE_<设备>=y 单符号控制设备选择，
+          # TARGET_PROFILE 是 defconfig 由这些符号推导出的结果，直接改它会被覆盖。
+          # 因此：关掉默认设备、打开目标设备、删除 TARGET_PROFILE 让它重新推导。
+          DEFAULT_DEV=$(grep -oP '^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_\K[\w.+-]+(?==y)' .config | head -1)
+          echo "defconfig 默认设备: ${DEFAULT_DEV:-(无)}"
 
-          if [ -n "$OLD_PROFILE" ]; then
-            sed -i "s|^CONFIG_TARGET_PROFILE=.*|CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"|" .config
-          else
-            echo "CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"" >> .config
+          # 关闭所有已选中的设备
+          sed -i 's|^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_\([\w.+-]*\)=y|# CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_\1 is not set|' .config
+          # 删除推导结果，交给下次 defconfig 重新生成
+          sed -i '/^CONFIG_TARGET_PROFILE=/d' .config
+
+          # 打开目标设备
+          if grep -q "^# CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_${DEVICE_NAME} is not set" .config; then
+            sed -i "s|^# CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_${DEVICE_NAME} is not set|CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_${DEVICE_NAME}=y|" .config
+          elif ! grep -q "^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_${DEVICE_NAME}=y" .config; then
+            echo "CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_${DEVICE_NAME}=y" >> .config
           fi
 
-          # 关掉默认设备，打开目标设备
-          sed -i "s|^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_${DEVICE_NAME}=.*|${DEVICE_SYMBOL}=y|" .config
-          if ! grep -q "^${DEVICE_SYMBOL}=" .config; then
-            echo "${DEVICE_SYMBOL}=y" >> .config
-          fi
+          echo "----- 改写后设备行 -----"
+          grep -E "^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_.*=y" .config | head -5
 
           # ---------- 第三步：追加插件清单并重建 ----------
           grep -vE '^CONFIG_TARGET_(DEVICE|PROFILE|ALL_PROFILES|MULTI_PROFILE)' \
@@ -165,12 +170,12 @@ jobs:
           grep -E "^CONFIG_TARGET_PROFILE=|^CONFIG_TARGET_airoha_an7581_DEVICE_.*=y" .config | head -10
 
           # ---------- 校验 ----------
-          DEV_OK=0
-          grep -q "^CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"" .config && DEV_OK=1
-          grep -q "^${DEVICE_SYMBOL}=y" .config && DEV_OK=1
-          if [ "$DEV_OK" != "1" ]; then
+          # 以 TARGET_DEVICE_<设备>=y 为准（LEDE 的真实控制符号）
+          if grep -q "^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_${DEVICE_NAME}=y" .config; then
+            echo "✅ 机型校验通过: ${DEVICE_NAME}"
+          else
             echo "::error::设备 ${DEVICE_NAME} 未被选中"
-            grep -i "nokia\|airoha_an7581" .config | head -20 || true
+            grep -i "nokia\|airoha_an7581_DEVICE" .config | head -20 || true
             exit 1
           fi
           echo "✅ 机型校验通过: ${DEVICE_NAME}"
