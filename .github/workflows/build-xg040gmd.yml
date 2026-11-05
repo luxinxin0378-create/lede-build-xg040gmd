@@ -275,6 +275,26 @@ jobs:
             fi
           done
 
+          echo "===== 2b) NPU 面板必需依赖 ====="
+          # devmem：Frame Engine 寄存器 + CPU 超频
+          if grep -qE "^CONFIG_(BUSYBOX_DEFAULT_DEVMEM|BUSYBOX_CONFIG_DEVMEM)=y" .config; then
+            echo "  OK   devmem applet"
+          else
+            echo "::warning::devmem 未在 .config 中启用，Frame Engine / 超频可能不可用"
+            grep -i "devmem" .config || true
+          fi
+          # debugfs：PPE 流程表
+          if grep -qE "^CONFIG_KERNEL_DEBUG_FS=y|^CONFIG_DEBUG_FS=y" .config; then
+            echo "  OK   debugfs"
+          else
+            echo "::warning::debugfs 未确认启用"
+          fi
+          # 内核选项
+          CFG2=$(ls target/linux/airoha/an7581/config-* | head -1)
+          grep -q "^CONFIG_NET_AIROHA_FLOW_STATS=y" "$CFG2" \
+            && echo "  OK   NET_AIROHA_FLOW_STATS（PPE 数据源）" \
+            || { echo "::error::PPE 统计未开启"; exit 1; }
+
           echo "===== 3) 固件内文件校验 ====="
           ROOTFS=$(ls bin/targets/airoha/an7581/*rootfs*.bin 2>/dev/null | head -1)
           echo "rootfs: $ROOTFS"
