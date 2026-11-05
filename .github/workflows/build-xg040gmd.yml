@@ -141,11 +141,11 @@ jobs:
         if: ${{ inputs.enable_npu_stats != false }}
         run: |
           cd lede
-          # LEDE 的内核配置在 target/linux/<target>/<subtarget>/config-*
+          # LEDE 的内核配置位于 target/linux/<target>/<subtarget>/config-*
           CFG=$(ls target/linux/airoha/an7581/config-* 2>/dev/null | head -1)
           if [ -z "$CFG" ]; then
-            echo "::warning::未找到 airoha/an7581 内核配置文件，跳过"
-            exit 0
+            echo "::error::未找到 airoha/an7581 内核配置"
+            exit 1
           fi
           echo "目标内核配置: $CFG"
 
@@ -160,13 +160,24 @@ jobs:
             fi
           }
 
+          # NPU 驱动（LEDE 默认已开，此处显式确保）
           set_kopt CONFIG_NET_AIROHA_NPU y
+          # PPE / Frame Engine 流量统计（LEDE 默认关闭，必须打开）
           set_kopt CONFIG_NET_AIROHA_FLOW_STATS y
+          # CPU 调频
           set_kopt CONFIG_ARM_AIROHA_SOC_CPUFREQ y
 
           echo "----- 修改后的 AIROHA 相关选项 -----"
           grep -i "NET_AIROHA\|AIROHA_SOC_CPUFREQ" "$CFG"
-          echo "✅ NPU 驱动 + PPE 统计 + CPUFREQ 已开启"
+
+          # 硬校验：必须真的改成功，否则直接失败，避免"编译成功但功能没有"
+          for k in CONFIG_NET_AIROHA_NPU CONFIG_NET_AIROHA_FLOW_STATS CONFIG_ARM_AIROHA_SOC_CPUFREQ; do
+            if ! grep -qx "${k}=y" "$CFG"; then
+              echo "::error::${k} 未能开启"
+              exit 1
+            fi
+          done
+          echo "✅ NPU 驱动 + PPE 统计 + CPUFREQ 内核选项均已确认 =y"
 
       - name: 插件命中校验
         run: |
@@ -221,6 +232,16 @@ jobs:
           ls -lh "$COREDIR"
           file "$COREDIR/clash_meta" || true
 
+      - name: 注入默认配置（Argon 主题 / flow offload）
+        run: |
+          cd lede
+          mkdir -p files
+          cp -rv "$GITHUB_WORKSPACE/files/." files/
+          chmod +x files/etc/uci-defaults/*
+          echo "----- uci-defaults -----"
+          ls -l files/etc/uci-defaults/
+          cat files/etc/uci-defaults/99-xg040gmd-init
+
       - name: 下载依赖源码
         run: |
           cd lede
@@ -235,6 +256,50 @@ jobs:
             exit 1
           fi
           tail -n 30 build.log
+
+      - name: 产物功能校验（NPU / PPE / Argon）
+        run: |
+          cd lede
+          echo "===== 1) 内核配置校验 ====="
+          CFG=$(ls target/linux/airoha/an7581/config-* | head -1)
+          grep -E "^CONFIG_NET_AIROHA_(NPU|FLOW_STATS)=y|^CONFIG_ARM_AIROHA_SOC_CPUFREQ=y" "$CFG" || {
+            echo "::error::内核配置文件里 NPU/PPE/CPUFREQ 未全部开启"; exit 1; }
+
+          echo "===== 2) .config 中相关包是否选中 ====="
+          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-argon luci-app-argon-config luci-app-openclash luci-app-qmodem kmod-nft-offload; do
+            if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then
+              echo "  OK   $p"
+            else
+              echo "::error::  MISS $p"
+              exit 1
+            fi
+          done
+
+          echo "===== 3) 固件内文件校验 ====="
+          ROOTFS=$(ls bin/targets/airoha/an7581/*rootfs*.bin 2>/dev/null | head -1)
+          echo "rootfs: $ROOTFS"
+          if [ -n "$ROOTFS" ]; then
+            # squashfs 用 unsquashfs 列目录检查关键文件
+            if command -v unsquashfs >/dev/null 2>&1; then
+              unsquashfs -l "$ROOTFS" 2>/dev/null > /tmp/fslist.txt || true
+              for f in \
+                "usr/lib/lua/luci/controller/airoha_npu.lua" \
+                "etc/uci-defaults/99-xg040gmd-init" \
+                "www/luci-static/argon" \
+                "etc/openclash/core/clash_meta"; do
+                if grep -q "$f" /tmp/fslist.txt 2>/dev/null; then
+                  echo "  OK   /$f"
+                else
+                  echo "  WARN /$f 未找到（路径可能因版本而异）"
+                fi
+              done
+            else
+              echo "unsquashfs 不可用，跳过文件级校验"
+            fi
+          fi
+
+          echo "===== 4) 编译产物中 内核模块 校验 ====="
+          ls -lh bin/targets/airoha/an7581/packages/ 2>/dev/null | head -20 || true
 
       - name: 整理产物
         run: |
