@@ -10,4 +10,10 @@ uci set firewall.@defaults[0].flow_offloading='1'
 uci set firewall.@defaults[0].flow_offloading_hw='1'
 uci commit firewall
 
+# ===== 挂载 debugfs（PPE 流程表 / NPU 状态依赖）=====
+if ! grep -q "debugfs" /etc/fstab 2>/dev/null; then
+  echo "debugfs   /sys/kernel/debug   debugfs   noauto,0 0" >> /etc/fstab
+fi
+mount -t debugfs none /sys/kernel/debug 2>/dev/null || true
+
 exit 0
