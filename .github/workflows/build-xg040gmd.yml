@@ -123,17 +123,32 @@ jobs:
             done
           fi
 
+          # 第一轮：先定 target/subtarget，让 defconfig 建立基础骨架
           make defconfig
 
-          # 设备符号校验（兼容两种写法）
-          if ! grep -q "^${DEVICE_SYMBOL}=y" .config; then
-            if grep -q "^CONFIG_TARGET_DEVICE_airoha_an7581_${DEVICE_NAME}=y" .config; then
-              echo "::warning::设备符号为无 DEVICE_ 前缀的旧写法"
-            else
-              echo "::error::设备 ${DEVICE_NAME} 未被选中"
-              grep -i "nokia\|airoha_an7581" .config | head -20 || true
-              exit 1
-            fi
+          # 关键：用 TARGET_PROFILE 精确指定设备，避免 defconfig 默认选中 evb
+          sed -i '/^CONFIG_TARGET_PROFILE=/d' .config
+          sed -i '/^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_/d' .config
+          sed -i '/^CONFIG_TARGET_DEVICE_PACKAGES_airoha_an7581_DEVICE_/d' .config
+          echo "CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"" >> .config
+          echo "${DEVICE_SYMBOL}=y" >> .config
+
+          # 追加插件清单
+          cat "$GITHUB_WORKSPACE/$CONFIG_FILE" >> .config
+
+          make defconfig
+
+          echo "----- 设备选择结果 -----"
+          grep -E "^CONFIG_TARGET_PROFILE=|^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_.*=y" .config | head -10
+
+          # 设备校验：TARGET_PROFILE 或 DEVICE 符号任一命中即通过
+          DEV_OK=0
+          grep -q "^CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"" .config && DEV_OK=1
+          grep -q "^${DEVICE_SYMBOL}=y" .config && DEV_OK=1
+          if [ "$DEV_OK" != "1" ]; then
+            echo "::error::设备 ${DEVICE_NAME} 未被选中"
+            grep -i "nokia\|airoha_an7581" .config | head -20 || true
+            exit 1
           fi
           echo "✅ 机型校验通过: ${DEVICE_NAME}"
 
