@@ -113,8 +113,44 @@ jobs:
       - name: 应用配置
         run: |
           cd lede
+
+          # ---------- 第一步：只写 target/subtarget，建立基础骨架 ----------
+          : > .config
+          cat >> .config <<'EOF'
+          CONFIG_TARGET_airoha=y
+          CONFIG_TARGET_airoha_an7581=y
+          EOF
+
           make defconfig
-          cat "$GITHUB_WORKSPACE/$CONFIG_FILE" >> .config
+
+          echo "----- 第一轮：target 是否命中 -----"
+          grep -E "^CONFIG_TARGET_(airoha|airoha_an7581|ARCH|BOARD|SUBTARGET)" .config | head -10
+          if ! grep -q "^CONFIG_TARGET_airoha_an7581=y" .config; then
+            echo "::error::target airoha_an7581 未被选中，内核/设备树可能不支持"
+            grep -i "airoha" .config | head -20 || true
+            exit 1
+          fi
+
+          # ---------- 第二步：锁定设备 profile ----------
+          # 此时 DEVICE_* 符号已存在于 .config，可以安全替换
+          OLD_PROFILE=$(grep '^CONFIG_TARGET_PROFILE=' .config | head -1 || true)
+          echo "defconfig 默认 profile: ${OLD_PROFILE:-(空)}"
+
+          if [ -n "$OLD_PROFILE" ]; then
+            sed -i "s|^CONFIG_TARGET_PROFILE=.*|CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"|" .config
+          else
+            echo "CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"" >> .config
+          fi
+
+          # 关掉默认设备，打开目标设备
+          sed -i "s|^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_${DEVICE_NAME}=.*|${DEVICE_SYMBOL}=y|" .config
+          if ! grep -q "^${DEVICE_SYMBOL}=" .config; then
+            echo "${DEVICE_SYMBOL}=y" >> .config
+          fi
+
+          # ---------- 第三步：追加插件清单并重建 ----------
+          grep -vE '^CONFIG_TARGET_(DEVICE|PROFILE|ALL_PROFILES|MULTI_PROFILE)' \
+            "$GITHUB_WORKSPACE/$CONFIG_FILE" >> .config
 
           if [ -n "${{ inputs.extra_packages }}" ]; then
             for p in ${{ inputs.extra_packages }}; do
@@ -123,25 +159,12 @@ jobs:
             done
           fi
 
-          # 第一轮：先定 target/subtarget，让 defconfig 建立基础骨架
-          make defconfig
-
-          # 关键：用 TARGET_PROFILE 精确指定设备，避免 defconfig 默认选中 evb
-          sed -i '/^CONFIG_TARGET_PROFILE=/d' .config
-          sed -i '/^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_/d' .config
-          sed -i '/^CONFIG_TARGET_DEVICE_PACKAGES_airoha_an7581_DEVICE_/d' .config
-          echo "CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"" >> .config
-          echo "${DEVICE_SYMBOL}=y" >> .config
-
-          # 追加插件清单
-          cat "$GITHUB_WORKSPACE/$CONFIG_FILE" >> .config
-
           make defconfig
 
           echo "----- 设备选择结果 -----"
-          grep -E "^CONFIG_TARGET_PROFILE=|^CONFIG_TARGET_DEVICE_airoha_an7581_DEVICE_.*=y" .config | head -10
+          grep -E "^CONFIG_TARGET_PROFILE=|^CONFIG_TARGET_airoha_an7581_DEVICE_.*=y" .config | head -10
 
-          # 设备校验：TARGET_PROFILE 或 DEVICE 符号任一命中即通过
+          # ---------- 校验 ----------
           DEV_OK=0
           grep -q "^CONFIG_TARGET_PROFILE=\"DEVICE_${DEVICE_NAME}\"" .config && DEV_OK=1
           grep -q "^${DEVICE_SYMBOL}=y" .config && DEV_OK=1
