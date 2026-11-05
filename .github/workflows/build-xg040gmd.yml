@@ -87,7 +87,16 @@ jobs:
         run: |
           cd lede
           add_feed() {
-            grep -q "src-git $1 " feeds.conf.default || echo "src-git $1 $2" >> feeds.conf.default
+            # 只把"未注释"的行视为已存在；上游预置了被注释的 #src-git qmodem ...，
+            # 旧的 grep 会误判为已挂载，导致 feed 实际没有生效
+            if grep -Eq "^[[:space:]]*src-git $1 " feeds.conf.default; then
+              echo "feed $1 已存在（激活状态）"
+            else
+              # 同时移除上游可能存在的同名注释行，避免混淆
+              sed -i "/^[[:space:]]*#*[[:space:]]*src-git $1 /d" feeds.conf.default
+              echo "src-git $1 $2" >> feeds.conf.default
+              echo "feed $1 已追加: $2"
+            fi
           }
           add_feed qmodem https://github.com/FUjr/QModem.git
           add_feed openclash https://github.com/vernesong/OpenClash.git
