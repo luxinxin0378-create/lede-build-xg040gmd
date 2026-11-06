@@ -199,7 +199,9 @@ jobs:
           fi
 
       - name: 开启 NPU / PPE 流量统计
-        if: ${{ inputs.enable_npu_stats != false }}
+        # push 触发时 inputs.* 为 null，null != false 在 GH 表达式中为假导致步骤被跳过。
+        # 修复：非手动触发一律执行；手动触发时按输入值决定。
+        if: ${{ inputs.enable_npu_stats != false || github.event_name != 'workflow_dispatch' }}
         run: |
           cd lede
           # LEDE 的内核配置位于 target/linux/<target>/<subtarget>/config-*
