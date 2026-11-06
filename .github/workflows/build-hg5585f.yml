@@ -327,7 +327,11 @@ jobs:
             echo "::error::内核配置文件里 NPU/PPE/CPUFREQ 未全部开启"; exit 1; }
 
           echo "===== 2) .config 中相关包是否选中 ====="
-          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-argon luci-app-argon-config luci-app-openclash luci-app-qmodem-next luci-app-qmodem-sms luci-app-qmodem-monitor kmod-nft-offload; do
+          # luci-app-qmodem-sms/mwan/ttl 是旧版界面的页面壳，依赖与 -next 互斥的
+          # luci-app-qmodem，无法共存；其功能本体如下（-next 已内置短信收发/转发）：
+          #   短信 = qmodem-smsd + sms-forwarder-next + libqmodem-sms
+          #   多WAN = luci-app-mwan3 ；TTL = luci-app-qmodem-ttlfw4
+          for p in luci-app-airoha-npu luci-app-cpufreq luci-theme-argon luci-app-argon-config luci-app-openclash luci-app-qmodem-next luci-app-qmodem-monitor qmodem-smsd sms-forwarder-next libqmodem-sms luci-app-qmodem-ttlfw4 luci-app-mwan3 kmod-nft-offload; do
             if grep -q "^CONFIG_PACKAGE_${p}=y" .config; then
               echo "  OK   $p"
             else
