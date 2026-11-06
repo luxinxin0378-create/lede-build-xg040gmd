@@ -418,20 +418,25 @@ jobs:
 
           echo "命名前缀: XG-040G-MD_LEDE_${DATE}_b${BUILDNO}"
 
-          # 逐个重命名——保留原始镜像类型标识，便于区分
+          # 逐个重命名——按镜像类型区分（修复：此前所有 .itb 都叫 kernel.itb 导致互相覆盖）
           for f in bin/targets/airoha/an7581/*xg-040g-md*; do
             [ -f "$f" ] || continue
             base=$(basename "$f")
             case "$base" in
-              *.itb)        kind="kernel.itb" ;;
-              *rootfs*.bin) kind="rootfs.bin" ;;
-              *.bin)        kind="factory.bin" ;;
-              *.img.gz)     kind="sysupgrade.img.gz" ;;
-              sha256sums)   continue ;;
-              *)            kind="${base##*.}" ;;
+              *sha256sums*|*.buildinfo)          continue ;;
+              *initramfs*recovery*.itb)          kind="recovery.itb" ;;
+              *sysupgrade*.itb)                  kind="sysupgrade.itb" ;;
+              *rootfs*.bin)                      kind="rootfs.bin" ;;
+              *.bin)                             kind="factory.bin" ;;
+              *.img.gz)                          kind="sysupgrade.img.gz" ;;
+              *.manifest)                        kind="manifest" ;;
+              *)                                 kind="${base##*.}" ;;
             esac
-            # 去掉 openwrt- 前缀与设备名，只保留类型
             NEW="XG-040G-MD_LEDE_${DATE}_b${BUILDNO}_${kind}"
+            if [ -e "$OUT/$NEW" ]; then
+              echo "::error::产物命名冲突: $NEW（上一个文件会被覆盖），中止"
+              exit 1
+            fi
             cp -v "$f" "$OUT/$NEW"
             echo "  重命名: $base -> $NEW"
           done
